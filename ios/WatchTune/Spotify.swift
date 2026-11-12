@@ -133,18 +133,24 @@ final class Spotify {
 
     // MARK: Web API
 
-    private func call(_ method: String, _ path: String, retry: Bool = true) async throws -> (Data, Int) {
+    private func call(_ method: String, _ path: String, body: [String: Any]? = nil, retry: Bool = true) async throws -> (Data, Int) {
         if Date() < backoffUntil { throw SpotifyError.http(429, "rate limited, waiting") }
         var req = URLRequest(url: URL(string: "https://api.spotify.com/v1" + path)!)
         req.httpMethod = method
         req.setValue("Bearer \(try await validToken())", forHTTPHeaderField: "Authorization")
-        if method != "GET" { req.httpBody = Data() ; req.setValue("0", forHTTPHeaderField: "Content-Length") }
+        if let body = body {
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        } else if method != "GET" {
+            req.httpBody = Data()
+            req.setValue("0", forHTTPHeaderField: "Content-Length")
+        }
         let (data, resp) = try await URLSession.shared.data(for: req)
         let http = resp as? HTTPURLResponse
         let status = http?.statusCode ?? 0
         if status == 401 && retry {
             accessToken = nil
-            return try await call(method, path, retry: false)
+            return try await call(method, path, body: body, retry: false)
         }
         if status == 429 {
             let wait = Double(http?.value(forHTTPHeaderField: "Retry-After") ?? "") ?? 5
@@ -156,11 +162,22 @@ final class Spotify {
         return (data, status)
     }
 
-    /// The current song, or nil if nothing is playing.
+    /// Device id of the last playback Spotify reported, for resuming when
+    /// no device is active any more.
+    private(set) var lastDeviceID: String? {
+        get { defaults.string(forKey: "spotifyLastDevice") }
+        set { defaults.set(newValue, forKey: "spotifyLastDevice") }
+    }
+
+    /// The current song, or nil if Spotify has no active playback (e.g. the
+    /// Spotify app went to sleep after a while paused).
     func nowPlaying() async throws -> NowPlaying? {
-        let (data, status) = try await call("GET", "/me/player/currently-playing?additional_types=episode")
+        let (data, status) = try await call("GET", "/me/player?additional_types=episode")
         if status == 204 || data.isEmpty { return nil }
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        if let device = json["device"] as? [String: Any], let id = device["id"] as? String {
+            lastDeviceID = id
+        }
         let playing = (json["is_playing"] as? Bool) ?? false
         guard let item = json["item"] as? [String: Any], let name = item["name"] as? String else {
             // Ads and some local files have no item
@@ -177,7 +194,25 @@ final class Spotify {
         return NowPlaying(text: WatchText.clean(full), isPlaying: playing)
     }
 
-    func play() async throws { _ = try await call("PUT", "/me/player/play") }
+    /// Resumes playback. If no device is active (Spotify answers 404), it
+    /// moves playback to the last device used, or a phone, or any device.
+    func play() async throws {
+        do {
+            _ = try await call("PUT", "/me/player/play")
+        } catch SpotifyError.http(404, _) {
+            let (data, _) = try await call("GET", "/me/player/devices")
+            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let devices = (json?["devices"] as? [[String: Any]]) ?? []
+            let pick = devices.first { ($0["id"] as? String) == lastDeviceID }
+                ?? devices.first { ($0["type"] as? String) == "Smartphone" }
+                ?? devices.first
+            guard let id = pick?["id"] as? String else {
+                throw SpotifyError.http(404, "No Spotify device available. Open Spotify on your phone once.")
+            }
+            _ = try await call("PUT", "/me/player", body: ["device_ids": [id], "play": true])
+        }
+    }
+
     func pause() async throws { _ = try await call("PUT", "/me/player/pause") }
     func next() async throws { _ = try await call("POST", "/me/player/next") }
     func previous() async throws { _ = try await call("POST", "/me/player/previous") }

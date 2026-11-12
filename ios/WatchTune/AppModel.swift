@@ -75,7 +75,13 @@ final class AppModel: ObservableObject {
         polling = true
         defer { polling = false }
         do {
-            now = try await spotify.nowPlaying()
+            if let playing = try await spotify.nowPlaying() {
+                now = playing
+            } else if let last = now {
+                // Spotify drops a paused session after a while: keep the
+                // last song on the watch, shown as paused, so A can resume it
+                now = NowPlaying(text: last.text, isPlaying: false)
+            }
             lastError = nil
         } catch {
             lastError = error.localizedDescription
