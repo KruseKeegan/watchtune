@@ -194,22 +194,26 @@ final class Spotify {
         return NowPlaying(text: WatchText.clean(full), isPlaying: playing)
     }
 
-    /// Resumes playback. If no device is active (Spotify answers 404), it
-    /// moves playback to the last device used, or a phone, or any device.
-    func play() async throws {
+    /// Resumes playback and says how. If no device is active (Spotify
+    /// answers 404), it moves playback to the last device used, or a phone,
+    /// or any device Spotify lists.
+    func play() async throws -> String {
         do {
             _ = try await call("PUT", "/me/player/play")
+            return "Spotify: resumed"
         } catch SpotifyError.http(404, _) {
             let (data, _) = try await call("GET", "/me/player/devices")
             let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
             let devices = (json?["devices"] as? [[String: Any]]) ?? []
+            let names = devices.map { "\($0["name"] as? String ?? "?") (\($0["type"] as? String ?? "?"))" }
             let pick = devices.first { ($0["id"] as? String) == lastDeviceID }
                 ?? devices.first { ($0["type"] as? String) == "Smartphone" }
                 ?? devices.first
             guard let id = pick?["id"] as? String else {
-                throw SpotifyError.http(404, "No Spotify device available. Open Spotify on your phone once.")
+                throw SpotifyError.http(404, "No active device, and Spotify lists no devices. Open Spotify on the phone.")
             }
             _ = try await call("PUT", "/me/player", body: ["device_ids": [id], "play": true])
+            return "Spotify: no active device. Devices: \(names.joined(separator: ", ")). Moved playback to \(pick?["name"] as? String ?? id)"
         }
     }
 

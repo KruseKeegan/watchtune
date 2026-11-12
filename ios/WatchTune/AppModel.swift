@@ -15,6 +15,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var now: NowPlaying?
     @Published private(set) var lastError: String?
     @Published private(set) var lastCommand: String?
+    /// Newest first: watch commands, Spotify replies and errors
+    @Published private(set) var activity: [String] = []
     @Published var keepRunning: Bool {
         didSet {
             UserDefaults.standard.set(keepRunning, forKey: "keepRunning")
@@ -46,6 +48,17 @@ final class AppModel: ObservableObject {
             Task { @MainActor in await self?.poll() }
         }
         Task { await poll() }
+    }
+
+    private static let clock: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss"
+        return f
+    }()
+
+    func log(_ message: String) {
+        activity.insert("\(Self.clock.string(from: Date()))  \(message)", at: 0)
+        if activity.count > 20 { activity.removeLast() }
     }
 
     // MARK: Spotify account
@@ -84,7 +97,9 @@ final class AppModel: ObservableObject {
             }
             lastError = nil
         } catch {
-            lastError = error.localizedDescription
+            let message = error.localizedDescription
+            if message != lastError { log("Poll error: \(message)") }
+            lastError = message
         }
         signedIn = spotify.isSignedIn
         sync()
@@ -128,6 +143,7 @@ final class AppModel: ObservableObject {
     private func handle(_ raw: String) async {
         let msg = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         lastCommand = msg
+        log("Watch: \(msg)")
         do {
             switch msg {
             case "?":
@@ -137,17 +153,24 @@ final class AppModel: ObservableObject {
                 let wasPlaying = now?.isPlaying ?? false
                 // Show the change on the watch straight away
                 if now != nil { now?.isPlaying = !wasPlaying; sync() }
-                if wasPlaying { try await spotify.pause() } else { try await spotify.play() }
+                if wasPlaying {
+                    try await spotify.pause()
+                    log("Spotify: paused")
+                } else {
+                    let result = try await spotify.play()
+                    log(result)
+                }
             case "NX":
                 try await spotify.next()
+                log("Spotify: next")
             case "PV":
                 try await spotify.previous()
+                log("Spotify: previous")
             default:
                 return
             }
-            lastError = nil
         } catch {
-            lastError = error.localizedDescription
+            log("Error: \(error.localizedDescription)")
         }
         pollSoon()
     }

@@ -14,9 +14,15 @@ struct ContentView: View {
                 } footer: {
                     Text("Plays silence alongside Spotify so iOS doesn't pause WatchTune, which keeps the watch updated with the phone in your pocket.")
                 }
-                if let err = model.lastError {
-                    Section("Last error") {
-                        Text(err).font(.footnote).foregroundStyle(.red)
+                Section("Activity") {
+                    if model.activity.isEmpty {
+                        Text("Nothing yet").foregroundStyle(.secondary)
+                    }
+                    ForEach(Array(model.activity.enumerated()), id: \.offset) { _, line in
+                        Text(line)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(line.contains("rror") ? Color.red : Color.primary)
+                            .textSelection(.enabled)
                     }
                 }
             }
