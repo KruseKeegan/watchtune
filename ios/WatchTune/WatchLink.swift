@@ -14,7 +14,22 @@ final class WatchLink: NSObject, ObservableObject {
     @Published private(set) var status = "Starting Bluetooth…"
     @Published private(set) var connected = false
     @Published private(set) var scanning = false
-    @Published private(set) var found: [CBPeripheral] = []
+    @Published private(set) var found: [Found] = []
+
+    /// A device seen by Find watch
+    struct Found: Identifiable {
+        let peripheral: CBPeripheral
+        var name: String
+        var rssi: Int
+        var hasForge: Bool        // advertises the Forge service
+        var alreadyConnected: Bool
+        var id: UUID { peripheral.identifier }
+    }
+
+    /// Services other apps' connections are commonly found by: the Forge
+    /// service itself, plus Device Information and Battery, which most
+    /// watches have. retrieveConnectedPeripherals needs at least one.
+    private static let connectedLookup = [service, CBUUID(string: "180A"), CBUUID(string: "180F")]
 
     /// A message from the watch (one notification, as a byte string)
     var onReceive: ((String) -> Void)?
@@ -40,10 +55,14 @@ final class WatchLink: NSObject, ObservableObject {
 
     func startScan() {
         guard central.state == .poweredOn else { return }
-        found = []
+        // Devices already connected to the phone (e.g. by the Ollee app)
+        // don't advertise, so a scan can't see them: list those first
+        found = central.retrieveConnectedPeripherals(withServices: Self.connectedLookup).map {
+            Found(peripheral: $0, name: $0.name ?? "Unnamed device", rssi: 0, hasForge: false, alreadyConnected: true)
+        }
         scanning = true
         status = "Looking for watches…"
-        central.scanForPeripherals(withServices: nil)
+        central.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
         DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in self?.stopScan() }
     }
 
@@ -102,7 +121,8 @@ final class WatchLink: NSObject, ObservableObject {
         }
         // The Ollee app usually has the watch connected already
         if let p = central.retrieveConnectedPeripherals(withServices: [Self.service]).first {
-            choose(p)
+            UserDefaults.standard.set(p.identifier.uuidString, forKey: savedKey)
+            connect(p)
             return
         }
         status = "Tap Find watch"
@@ -147,8 +167,24 @@ extension WatchLink: CBCentralManagerDelegate {
 
     func centralManager(_ central: CBCentralManager, didDiscover p: CBPeripheral,
                         advertisementData: [String: Any], rssi RSSI: NSNumber) {
-        guard p.name != nil, !found.contains(where: { $0.identifier == p.identifier }) else { return }
-        found.append(p)
+        let uuids = (advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID] ?? [])
+            + (advertisementData[CBAdvertisementDataOverflowServiceUUIDsKey] as? [CBUUID] ?? [])
+        let name = (advertisementData[CBAdvertisementDataLocalNameKey] as? String) ?? p.name ?? "Unnamed device"
+        let entry = Found(peripheral: p, name: name, rssi: RSSI.intValue,
+                          hasForge: uuids.contains(Self.service), alreadyConnected: false)
+        if let i = found.firstIndex(where: { $0.id == p.identifier }) {
+            if !found[i].alreadyConnected { found[i] = entry }
+        } else {
+            found.append(entry)
+        }
+        // Forge watches first, then nearest first; unnamed devices last
+        found.sort { a, b in
+            if a.hasForge != b.hasForge { return a.hasForge }
+            if a.alreadyConnected != b.alreadyConnected { return a.alreadyConnected }
+            let an = a.name != "Unnamed device", bn = b.name != "Unnamed device"
+            if an != bn { return an }
+            return a.rssi > b.rssi
+        }
     }
 
     func centralManager(_ central: CBCentralManager, didConnect p: CBPeripheral) {

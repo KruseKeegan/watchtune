@@ -42,8 +42,23 @@ struct ContentView: View {
         Section {
             LabeledContent("Status", value: model.watch.status)
             if model.watch.scanning || !model.watch.found.isEmpty {
-                ForEach(model.watch.found, id: \.identifier) { p in
-                    Button(p.name ?? "Unknown") { model.watch.choose(p) }
+                ForEach(model.watch.found) { f in
+                    Button { model.watch.choose(f.peripheral) } label: {
+                        HStack {
+                            VStack(alignment: .leading) {
+                                Text(f.name)
+                                if f.hasForge {
+                                    Text("Forge watch").font(.caption).foregroundStyle(.green)
+                                } else if f.alreadyConnected {
+                                    Text("Connected to this phone").font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer()
+                            if !f.alreadyConnected {
+                                Text("\(f.rssi) dBm").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
                 }
             }
             Button(model.watch.scanning ? "Searching…" : "Find watch") { model.watch.startScan() }
