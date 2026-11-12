@@ -14,6 +14,7 @@
 //   S<text>  start a new song text      C<text>  continue it
 //   E        end: show the text         P1 / P0  playing / paused
 //   X        nothing playing
+//   M<text>  show a short message for 2.5 s (e.g. "PHOnE": look at phone)
 // Watch -> phone:
 //   PP play/pause   NX next   PV previous   ?  resend everything
 
@@ -65,14 +66,14 @@ function startScroll() {
   if (Ollee.active() && msgId === -1 && song.length > W) scrollId = Ollee.setInterval(step, SCROLL_MS);
 }
 
-// Shows a short message for 1 s, then the song again
-function flash(t) {
+// Shows a short message for `ms` (default 1 s), then the song again
+function flash(t, ms) {
   if (!Ollee.active()) return;
   if (msgId !== -1) Ollee.clearTimeout(msgId);
   msgId = -1;
   stopScroll();
   Ollee.drawMain(t);
-  msgId = Ollee.setTimeout(function () { msgId = -1; off = 0; show(); }, 1000);
+  msgId = Ollee.setTimeout(function () { msgId = -1; off = 0; show(); }, ms || 1000);
 }
 
 function cmd(c) {
@@ -106,6 +107,7 @@ function ble_rx(d) {
     if (buf !== song) { song = buf; startScroll(); }
     buf = '';
   } else if (t === 'P') { playing = r === '1'; show(); }
+  else if (t === 'M') flash(r, 2500);
   else if (t === 'X') { song = ''; buf = ''; playing = false; stopScroll(); show(); }
 }
 

@@ -9,12 +9,13 @@ struct NowPlaying: Equatable {
 }
 
 enum SpotifyError: LocalizedError {
-    case noClientID, notSignedIn, signInFailed(String), http(Int, String)
+    case noClientID, notSignedIn, noDevice, signInFailed(String), http(Int, String)
 
     var errorDescription: String? {
         switch self {
         case .noClientID: return "Enter your Spotify Client ID first."
         case .notSignedIn: return "Sign in to Spotify first."
+        case .noDevice: return "Spotify lists no devices: the Spotify app is asleep. Open it on the phone."
         case .signInFailed(let m): return "Spotify sign-in failed: \(m)"
         case .http(let code, let body): return "Spotify error \(code): \(body.prefix(160))"
         }
@@ -169,17 +170,51 @@ final class Spotify {
         set { defaults.set(newValue, forKey: "spotifyLastDevice") }
     }
 
+    /// Details of the last playback Spotify reported, for silent pause and
+    /// resume. nil when Spotify has no active playback.
+    private(set) var playback: Playback?
+
+    struct Playback {
+        var deviceID: String?
+        var deviceName: String
+        var supportsVolume: Bool
+        var volume: Int
+        var trackURI: String?
+        var contextURI: String?
+        var progressMs: Int
+        var isPlaying: Bool
+        var fetchedAt: Date
+
+        /// Where the song is now, allowing for time since the poll
+        var positionNow: Int {
+            isPlaying ? progressMs + Int(Date().timeIntervalSince(fetchedAt) * 1000) : progressMs
+        }
+    }
+
     /// The current song, or nil if Spotify has no active playback (e.g. the
     /// Spotify app went to sleep after a while paused).
     func nowPlaying() async throws -> NowPlaying? {
         let (data, status) = try await call("GET", "/me/player?additional_types=episode")
-        if status == 204 || data.isEmpty { return nil }
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-        if let device = json["device"] as? [String: Any], let id = device["id"] as? String {
-            lastDeviceID = id
+        guard status != 204, !data.isEmpty,
+              let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            playback = nil
+            return nil
         }
+        let device = json["device"] as? [String: Any] ?? [:]
+        if let id = device["id"] as? String { lastDeviceID = id }
         let playing = (json["is_playing"] as? Bool) ?? false
-        guard let item = json["item"] as? [String: Any], let name = item["name"] as? String else {
+        let item = json["item"] as? [String: Any]
+        playback = Playback(
+            deviceID: device["id"] as? String,
+            deviceName: device["name"] as? String ?? "?",
+            supportsVolume: device["supports_volume"] as? Bool ?? false,
+            volume: device["volume_percent"] as? Int ?? 0,
+            trackURI: item?["uri"] as? String,
+            contextURI: (json["context"] as? [String: Any])?["uri"] as? String,
+            progressMs: json["progress_ms"] as? Int ?? 0,
+            isPlaying: playing,
+            fetchedAt: Date())
+        guard let item = item, let name = item["name"] as? String else {
             // Ads and some local files have no item
             return (json["currently_playing_type"] as? String) == "ad"
                 ? NowPlaying(text: "Ad", isPlaying: playing) : nil
@@ -196,7 +231,7 @@ final class Spotify {
 
     /// Resumes playback and says how. If no device is active (Spotify
     /// answers 404), it moves playback to the last device used, or a phone,
-    /// or any device Spotify lists.
+    /// or any device Spotify lists. Throws `noDevice` if there's none.
     func play() async throws -> String {
         do {
             _ = try await call("PUT", "/me/player/play")
@@ -209,12 +244,33 @@ final class Spotify {
             let pick = devices.first { ($0["id"] as? String) == lastDeviceID }
                 ?? devices.first { ($0["type"] as? String) == "Smartphone" }
                 ?? devices.first
-            guard let id = pick?["id"] as? String else {
-                throw SpotifyError.http(404, "No active device, and Spotify lists no devices. Open Spotify on the phone.")
-            }
+            guard let id = pick?["id"] as? String else { throw SpotifyError.noDevice }
             _ = try await call("PUT", "/me/player", body: ["device_ids": [id], "play": true])
             return "Spotify: no active device. Devices: \(names.joined(separator: ", ")). Moved playback to \(pick?["name"] as? String ?? id)"
         }
+    }
+
+    func setVolume(_ percent: Int) async throws {
+        _ = try await call("PUT", "/me/player/volume?volume_percent=\(max(0, min(100, percent)))")
+    }
+
+    func seek(_ ms: Int) async throws {
+        _ = try await call("PUT", "/me/player/seek?position_ms=\(max(0, ms))")
+    }
+
+    /// Plays `trackURI` from `positionMs`, inside its playlist/album when
+    /// there is one so the queue carries on after it.
+    func play(track trackURI: String, context contextURI: String?, at positionMs: Int) async throws {
+        if let ctx = contextURI {
+            do {
+                _ = try await call("PUT", "/me/player/play", body: [
+                    "context_uri": ctx, "offset": ["uri": trackURI], "position_ms": positionMs])
+                return
+            } catch SpotifyError.http(let code, _) where code == 400 || code == 404 {
+                // Some contexts (e.g. an artist) don't take an offset
+            }
+        }
+        _ = try await call("PUT", "/me/player/play", body: ["uris": [trackURI], "position_ms": positionMs])
     }
 
     func pause() async throws { _ = try await call("PUT", "/me/player/pause") }

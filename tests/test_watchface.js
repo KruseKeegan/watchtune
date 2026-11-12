@@ -137,7 +137,17 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   st.connected = true;
   w.enter();
   check('re-enter after flash shows song', st.main === 'Anothe', JSON.stringify(st.main));
+  // M message from the phone: shown for 2.5 s, then the song
+  h.ble_rx('M PHOnE');
+  check('M shows message', st.main === ' PHOnE', JSON.stringify(st.main));
+  await sleep(1500);
+  check('M still showing at 1.5 s', st.main === ' PHOnE');
+  await sleep(1200);
+  check('M ends, song back', st.main === 'Anothe', JSON.stringify(st.main));
+  check('timers within 4 after M', w.used() <= 4);
   w.exit();
+  h.ble_rx('M PHOnE');
+  check('M off screen does nothing', w.used() === 0);
   console.log(fails ? `${fails} FAILED` : 'ALL PASS');
   process.exit(fails ? 1 : 0);
 })();
