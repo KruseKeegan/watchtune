@@ -4,3 +4,4 @@ ios/Payload/
 ios/WatchTune/Info.plist
 *.ipa
 .DS_Store
+dist/

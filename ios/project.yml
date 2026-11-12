@@ -1,0 +1,35 @@
+# XcodeGen spec: CI runs `xcodegen` to create WatchTune.xcodeproj, so no
+# Xcode project file is kept in the repo.
+name: WatchTune
+options:
+  bundleIdPrefix: com.krusekeegan
+  deploymentTarget:
+    iOS: "16.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    TARGETED_DEVICE_FAMILY: "1"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  WatchTune:
+    type: application
+    platform: iOS
+    sources: [WatchTune]
+    scheme: {}
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.krusekeegan.watchtune
+    info:
+      path: WatchTune/Info.plist
+      properties:
+        CFBundleDisplayName: WatchTune
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        NSBluetoothAlwaysUsageDescription: WatchTune talks to your Ollee Watch over Bluetooth to show the song and take button presses.
+        UIBackgroundModes: [bluetooth-central, audio]
+        CFBundleURLTypes:
+          - CFBundleURLName: com.krusekeegan.watchtune
+            CFBundleURLSchemes: [watchtune]

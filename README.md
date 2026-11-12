@@ -37,8 +37,18 @@ Each BLE write is at most 20 bytes; the first character is the type.
 | phone → watch | `S<text>` / `C<text>` / `E` | start, continue, end of the song text |
 | phone → watch | `P1` / `P0` | playing / paused |
 | phone → watch | `X` | nothing playing |
+| phone → watch | `M<text>` | show a short message for 2.5 s |
 | watch → phone | `PP` / `NX` / `PV` | play-pause / next / previous |
 | watch → phone | `?` | resend everything |
+
+## Pausing
+
+iOS puts the Spotify app to sleep about a minute after it's paused, and Spotify then drops the phone from its device list, so nothing can resume it remotely. WatchTune handles this two ways:
+
+- **Silent pause:** if Spotify allows volume control on the device, A mutes instead of pausing so Spotify stays awake, and resumes at the same song and second. After 20 minutes it becomes a real pause. Spotify blocks volume control on most iPhones, so this usually falls back to a real pause.
+- **Tap to resume:** if Spotify is asleep when you press A, the watch shows `PHOnE` and the phone gets a notification. Tapping it opens Spotify and WatchTune starts playback. Add WatchTune to your Focus modes' allowed apps, or Focus will hold the notification back.
+
+The app's **Activity** list shows every watch command, Spotify's reply and any error.
 
 ## Limits
 
