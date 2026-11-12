@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WatchTune sign-in</title>
+<style>
+  body { font-family: -apple-system, sans-serif; background: #111; color: #eee; padding: 24px; }
+  a { color: #f87029; }
+</style>
+</head>
+<body>
+<!-- Spotify only accepts https redirect URIs, so it sends the sign-in code
+     here, and this page hands it to the WatchTune app's watchtune:// scheme
+     (caught by the app's sign-in sheet). -->
+<p id="msg">Returning to WatchTune…</p>
+<p><a id="link" href="#">Tap here if nothing happens</a></p>
+<script>
+  var target = 'watchtune://callback' + location.search;
+  document.getElementById('link').href = target;
+  location.replace(target);
+</script>
+</body>
+</html>

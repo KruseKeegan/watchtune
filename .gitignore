@@ -1,0 +1,6 @@
+ios/WatchTune.xcodeproj/
+ios/build/
+ios/Payload/
+ios/WatchTune/Info.plist
+*.ipa
+.DS_Store
